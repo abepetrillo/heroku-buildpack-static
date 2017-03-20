@@ -68,6 +68,23 @@ RSpec.describe "Simple" do
         expect(response.body.chomp).to eq("bar")
       end
     end
+
+    context "when there is a conflict" do
+      let(:name) { "clean_urls_conflict" }
+
+
+      it "should be able to handle when a directory and .html file share the same name" do
+        app.run do
+          response = app.get("/foo/bar")
+          expect(response.code).to eq("200")
+          expect(response.body.chomp).to eq("bar")
+
+          response = app.get("/foo")
+          expect(response.code).to eq("200")
+          expect(response.body.chomp).to eq("foobar")
+        end
+      end
+    end
   end
 
   describe "routes" do
@@ -383,6 +400,7 @@ STATIC_JSON
       include PathHelper
 
       let(:name)              { "proxies" }
+      let(:proxy_scheme)      { "http" }
       let(:static_json_path)  { fixtures_path("proxies/static.json") }
       let(:proxy) do
         <<PROXY
@@ -393,6 +411,16 @@ end
 get "/foo/baz/" do
   "baz"
 end
+
+get "/foo/http_redirect/" do
+  uri = URI("http://\#{request.host}/foo/redirect")
+  redirect URI(uri), 307
+end
+
+get "/foo/https_redirect/" do
+  uri = URI("https://\#{request.host}/foo/redirect")
+  redirect URI(uri), 307
+end
 PROXY
       end
       let(:setup_static_json) do
@@ -402,7 +430,7 @@ PROXY
 {
   "proxies": {
     "/api/": {
-      "origin": "http://#{@proxy_ip_address}#{path}"
+      "origin": "#{proxy_scheme}://#{@proxy_ip_address}#{path}"
     }
   },
   "headers": {
@@ -419,7 +447,7 @@ STATIC_JSON
 
       before do
         @proxy_ip_address = app.proxy.ip_address
-        setup_static_json.call("/foo/")
+        setup_static_json.call("/foo")
       end
 
       after do
@@ -437,6 +465,18 @@ STATIC_JSON
           expect(response.code).to eq("200")
           expect(response.body.chomp).to eq("baz")
           expect(response["X-Header"]).to be_nil
+        end
+      end
+
+      it "should hanadle redirects regardless of scheme" do
+        app.run do
+          response = app.get("/api/http_redirect/")
+          expect(response.code).to eq("307")
+          expect(response["Location"]).not_to include(@proxy_ip_address)
+
+          response = app.get("/api/https_redirect/")
+          expect(response.code).to eq("307")
+          expect(response["Location"]).not_to include(@proxy_ip_address)
         end
       end
     end
@@ -525,9 +565,13 @@ STATIC_JSON
           expect(response.code).to eq("302")
           expect(app.get(response["location"]).body.chomp).to eq("goodbye")
 
-          response = app.get("/foo")
+          response = app.get("/hello")
           expect(response.code).to eq("200")
           expect(response.body.chomp).to eq("hello world")
+
+          response = app.get("/foo")
+          expect(response.code).to eq("200")
+          expect(response.body.chomp).to eq("foo")
         end
       end
     end
